@@ -1,0 +1,52 @@
+@import "tailwindcss";
+@source "../../../packages/shared/src";
+
+:root {
+  --brand: #9b1c31;
+  --brand-dark: #7a1626;
+}
+
+html {
+  /* Stop the browser's own pull-to-refresh / rubber-banding; the app provides its own. */
+  overscroll-behavior-y: contain;
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  background: #e2e8f0;
+  color: #0f172a;
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans Thai", sans-serif;
+  -webkit-tap-highlight-color: transparent;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Native feel: no text selection / callouts on controls, 16px inputs so iOS doesn't zoom. */
+button, a, [role="tab"] {
+  -webkit-touch-callout: none;
+  user-select: none;
+  touch-action: manipulation;
+}
+input, select, textarea { font-size: 16px; }
+a:active, button:not(:disabled):active { transform: scale(0.98); }
+button, a { transition: transform .12s ease, background-color .15s ease, opacity .15s ease; }
+
+/* Page / sheet / toast motion */
+@keyframes page-in { from { opacity: 0; transform: translateX(14px); } to { opacity: 1; transform: none; } }
+@keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
+@keyframes sheet-up { from { transform: translateY(100%); } to { transform: none; } }
+@keyframes toast-in { from { opacity: 0; transform: translateY(-8px) scale(.96); } to { opacity: 1; transform: none; } }
+.page-enter { animation: page-in .22s ease-out; }
+.sheet-backdrop { animation: fade-in .2s ease-out; }
+.sheet-panel { animation: sheet-up .25s cubic-bezier(.2, .8, .2, 1); }
+.toast-in { animation: toast-in .2s ease-out; }
+
+@media (prefers-reduced-motion: reduce) {
+  .page-enter, .sheet-backdrop, .sheet-panel, .toast-in { animation: none; }
+  button, a { transition: none; }
+  a:active, button:not(:disabled):active { transform: none; }
+}
+
+@media print {
+  .no-print { display: none !important; }
+  body { background: white; }
+}

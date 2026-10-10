@@ -1,0 +1,13 @@
+@import "tailwindcss";
+@source "../../../packages/shared/src";
+
+:root {
+  --brand: #9b1c31;
+  --brand-dark: #7a1626;
+}
+
+body {
+  background: #f8fafc;
+  color: #0f172a;
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans Thai", sans-serif;
+}

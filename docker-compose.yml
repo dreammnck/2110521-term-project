@@ -1,0 +1,131 @@
+name: condo
+
+x-backend: &backend
+  restart: unless-stopped
+  depends_on:
+    postgres: { condition: service_healthy }
+    rabbitmq: { condition: service_healthy }
+  environment: &backend-env
+    JWT_SECRET: ${JWT_SECRET:-dev-secret-change-me}
+    AMQP_URL: amqp://guest:guest@rabbitmq:5672/
+    WEBHOOK_SECRET: ${WEBHOOK_SECRET:-dev-webhook-secret}
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: condo
+      POSTGRES_PASSWORD: condo
+    ports: ["5433:5432"]
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./deploy/postgres/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U condo"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  rabbitmq:
+    image: rabbitmq:3-management-alpine
+    ports: ["5672:5672", "15672:15672"]
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  gateway:
+    <<: *backend
+    build: { context: ./backend, args: { SERVICE: gateway } }
+    ports: ["8080:8080"]
+    environment:
+      <<: *backend-env
+      IDENTITY_URL: http://identity:8081
+      PARCEL_URL: http://parcel:8082
+      BILLING_URL: http://billing:8083
+      NOTIFICATION_URL: http://notification-adapter:8084
+      ANNOUNCEMENT_GRPC_ADDR: announcement:9090
+      ALLOWED_ORIGINS: http://localhost:${STAFF_PORT:-3000},http://localhost:${RESIDENT_PORT:-3001}
+
+  identity:
+    <<: *backend
+    build: { context: ./backend, args: { SERVICE: identity } }
+    environment:
+      <<: *backend-env
+      DATABASE_URL: postgres://condo:condo@postgres:5432/identity_db
+
+  parcel:
+    <<: *backend
+    build: { context: ./backend, args: { SERVICE: parcel } }
+    volumes: ["parcel_photos:/data/photos"]
+    environment:
+      <<: *backend-env
+      DATABASE_URL: postgres://condo:condo@postgres:5432/parcel_db
+      PHOTO_DIR: /data/photos
+
+  announcement:
+    <<: *backend
+    build: { context: ./backend, args: { SERVICE: announcement } }
+    environment:
+      <<: *backend-env
+      DATABASE_URL: postgres://condo:condo@postgres:5432/announcement_db
+
+  billing:
+    <<: *backend
+    build: { context: ./backend, args: { SERVICE: billing } }
+    environment:
+      <<: *backend-env
+      DATABASE_URL: postgres://condo:condo@postgres:5432/billing_db
+      PAYMENT_ADAPTER_URL: http://payment-adapter:8085
+      RESIDENT_RETURN_URL: http://localhost:${RESIDENT_PORT:-3001}/bills/return
+      WATER_RATE: "18"
+      ELECTRIC_RATE: "7"
+
+  notification-adapter:
+    <<: *backend
+    build: { context: ./backend, args: { SERVICE: notification-adapter } }
+    environment:
+      <<: *backend-env
+      DATABASE_URL: postgres://condo:condo@postgres:5432/notification_db
+      IDENTITY_URL: http://identity:8081
+
+  payment-adapter:
+    <<: *backend
+    build: { context: ./backend, args: { SERVICE: payment-adapter } }
+    environment:
+      <<: *backend-env
+      GATEWAY_URL: http://mock-gateway:8090
+      WEBHOOK_URL: http://payment-adapter:8085/webhooks/gateway
+      BILLING_URL: http://billing:8083
+
+  # Stands in for the external Payment Gateway; its checkout page is opened in the browser.
+  mock-gateway:
+    <<: *backend
+    build: { context: ./backend, args: { SERVICE: mock-gateway } }
+    ports: ["8090:8090"]
+    environment:
+      <<: *backend-env
+      PUBLIC_URL: http://localhost:8090
+
+  staff-web:
+    build: { context: ./web, args: { APP: staff-web } }
+    restart: unless-stopped
+    depends_on: [gateway]
+    ports: ["${STAFF_PORT:-3000}:3000"]
+    environment:
+      PORT: "3000"
+      GATEWAY_URL: http://gateway:8080
+
+  resident-app:
+    build: { context: ./web, args: { APP: resident-app } }
+    restart: unless-stopped
+    depends_on: [gateway]
+    ports: ["${RESIDENT_PORT:-3001}:3001"]
+    environment:
+      PORT: "3001"
+      GATEWAY_URL: http://gateway:8080
+
+volumes:
+  pgdata:
+  parcel_photos:

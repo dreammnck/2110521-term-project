@@ -1,0 +1,79 @@
+syntax = "proto3";
+
+package announcement.v1;
+
+option go_package = "condo/gen/announcement/v1;announcementv1";
+
+// Announcement is the contract between the API Gateway and the Announcement Service (ADR-02).
+message Announcement {
+  string id = 1;
+  string title = 2;
+  string body = 3;
+  string category = 4;
+  string status = 5;       // DRAFT | PUBLISHED | ARCHIVED
+  string target_type = 6;  // ALL | BUILDING | FLOOR
+  string target_building_id = 7;
+  int32 target_floor = 8;
+  string publish_at = 9;   // RFC3339
+  string created_by = 10;
+  string updated_at = 11;  // RFC3339
+  bool read = 12;          // populated per caller on resident reads
+}
+
+message PublishRequest {
+  string title = 1;
+  string body = 2;
+  string category = 3;
+  string target_type = 4;
+  string target_building_id = 5;
+  int32 target_floor = 6;
+  string publish_at = 7;
+  string created_by = 8;
+}
+
+message UpdateRequest {
+  string id = 1;
+  string title = 2;
+  string body = 3;
+  string category = 4;
+  string target_type = 5;
+  string target_building_id = 6;
+  int32 target_floor = 7;
+}
+
+message ArchiveRequest { string id = 1; }
+
+message ListRequest {
+  // Caller context. For staff, all=true returns every announcement.
+  bool all = 1;
+  string user_id = 2;
+  string building_id = 3;
+  int32 floor = 4;
+}
+
+message ListResponse { repeated Announcement announcements = 1; }
+
+message GetRequest {
+  string id = 1;
+  string user_id = 2;
+  // Caller context for target enforcement; staff pass all=true.
+  bool all = 3;
+  string building_id = 4;
+  int32 floor = 5;
+}
+
+message MarkReadRequest {
+  string id = 1;
+  string user_id = 2;
+}
+
+message MarkReadResponse {}
+
+service AnnouncementService {
+  rpc Publish(PublishRequest) returns (Announcement);
+  rpc Update(UpdateRequest) returns (Announcement);
+  rpc Archive(ArchiveRequest) returns (Announcement);
+  rpc List(ListRequest) returns (ListResponse);
+  rpc Get(GetRequest) returns (Announcement);
+  rpc MarkRead(MarkReadRequest) returns (MarkReadResponse);
+}

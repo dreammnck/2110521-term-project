@@ -1,0 +1,11 @@
+{
+  "name": "condo-web",
+  "private": true,
+  "workspaces": ["packages/*", "staff-web", "resident-app"],
+  "scripts": {
+    "dev:staff": "npm run dev -w staff-web",
+    "dev:resident": "npm run dev -w resident-app",
+    "build": "npm run build -w staff-web && npm run build -w resident-app",
+    "typecheck": "npm run typecheck -w staff-web && npm run typecheck -w resident-app"
+  }
+}
