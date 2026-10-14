@@ -20,6 +20,8 @@ make down        # stop   (make clean also deletes the database volume)
 | API gateway | http://localhost:8080/api/v1 |
 | Mock payment gateway (checkout page) | http://localhost:8090 |
 | RabbitMQ UI (guest / guest) | http://localhost:15672 |
+| MongoDB (Compass / mongosh) | mongodb://localhost:27018 |
+| PostgreSQL | localhost:5433 (user/password `condo`) |
 
 > Ports 3000/3001 busy? Set `STAFF_PORT` / `RESIDENT_PORT` in a `.env` file next to `docker-compose.yml`
 > (e.g. `STAFF_PORT=3100`); the payment return URL and CORS origins follow automatically.
@@ -58,11 +60,11 @@ flowchart LR
     payad["Payment Adapter"]
   end
 
-  idb[("identity_db")]
-  pdb[("parcel_db")]
-  adb[("announcement_db")]
-  bdb[("billing_db")]
-  ndb[("notification_db")]
+  idb[("identity_db<br/>PostgreSQL")]
+  pdb[("parcel_db<br/>PostgreSQL")]
+  adb[("announcement_db<br/>PostgreSQL")]
+  bdb[("billing_db<br/>PostgreSQL")]
+  ndb[("notification_db<br/>MongoDB")]
 
   mq[["RabbitMQ<br/>exchange condo.events"]]
 
@@ -194,10 +196,11 @@ sequenceDiagram
 
 | ADR | Decision | Where |
 |---|---|---|
-| 01 Microservices | One service per business capability, each with its **own database** (`identity_db`, `parcel_db`, `announcement_db`, `billing_db`, `notification_db`) | `backend/cmd/*`, `backend/internal/*`, `deploy/postgres/init.sql` |
+| 01 Microservices | One service per business capability, each with its **own database** (PostgreSQL: `identity_db`, `parcel_db`, `announcement_db`, `billing_db`; MongoDB: `notification_db`) | `backend/cmd/*`, `backend/internal/*`, `deploy/postgres/init.sql` |
 | 02 REST + gRPC | Clients use REST via the gateway; the gateway talks **gRPC** to the Announcement Service and maps gRPC↔HTTP status codes | `proto/`, `backend/internal/gateway/announcements.go` |
 | 03 Event-driven notifications | Services publish `ParcelReceived`, `ParcelAccepted`, `AnnouncementPublished`, `UtilityBillIssued` (+ `PaymentCompleted`) to RabbitMQ; the Notification Adapter consumes them, deduplicating by event id | `backend/pkg/events`, `backend/internal/notification` |
-| 04 Relational DB | PostgreSQL, foreign keys within a service (`payments.bill_id → utility_bills`, `rooms → buildings`) | `backend/internal/*/schema.sql` |
+| 04 Relational DB | PostgreSQL for users/rooms, parcels, announcements, bills and payments, with foreign keys inside a service (`payments.bill_id → utility_bills`, `rooms → buildings`) | `backend/internal/*/schema.sql` |
+| 06 NoSQL for notifications *(added)* | The Notification Adapter stores notifications as documents in **MongoDB**: write-heavy, event-shaped, only read per user. A unique `(event_id, user_id)` index makes event handling idempotent | `backend/internal/notification`, [`docs/adr-06-nosql-notifications.md`](docs/adr-06-nosql-notifications.md) |
 | 05 Third-party payment gateway | Billing only stores `paymentReference, billId, amount, paymentStatus, paidAt`. Gateway webhooks are HMAC-signed, timestamp-checked and applied idempotently | `backend/internal/paymentadapter`, `backend/pkg/webhook`, `backend/internal/mockgateway` |
 
 Notes and deliberate choices:
@@ -209,6 +212,10 @@ Notes and deliberate choices:
 - The Next.js apps keep the JWT in an `httpOnly` cookie and proxy API calls through `/api/gw/*`, so the token never reaches browser JS.
 - Overdue is derived at read time (`UNPAID` and past due date).
 - Water/electricity rates are config (`WATER_RATE`, `ELECTRIC_RATE`, default 18 and 7 THB per unit).
+
+## Demo
+
+A timed (< 5 min) video script covering all use cases, both database types and RabbitMQ is in [`docs/DEMO.md`](docs/DEMO.md).
 
 ## Layout
 

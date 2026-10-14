@@ -1,6 +1,5 @@
--- One database per service (ADR-01: each service owns its data).
+-- One relational database per service (ADR-01). Notifications live in MongoDB (ADR-06).
 CREATE DATABASE identity_db;
 CREATE DATABASE parcel_db;
 CREATE DATABASE announcement_db;
 CREATE DATABASE billing_db;
-CREATE DATABASE notification_db;

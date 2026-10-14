@@ -26,6 +26,17 @@ services:
       timeout: 3s
       retries: 20
 
+  # Document store used by the Notification Adapter (the system's NoSQL database).
+  mongo:
+    image: mongo:7
+    ports: ["27018:27017"]
+    volumes: ["mongodata:/data/db"]
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
   rabbitmq:
     image: rabbitmq:3-management-alpine
     ports: ["5672:5672", "15672:15672"]
@@ -85,9 +96,13 @@ services:
   notification-adapter:
     <<: *backend
     build: { context: ./backend, args: { SERVICE: notification-adapter } }
+    depends_on:
+      mongo: { condition: service_healthy }
+      rabbitmq: { condition: service_healthy }
     environment:
       <<: *backend-env
-      DATABASE_URL: postgres://condo:condo@postgres:5432/notification_db
+      MONGO_URL: mongodb://mongo:27017
+      MONGO_DB: notification_db
       IDENTITY_URL: http://identity:8081
 
   payment-adapter:
@@ -128,4 +143,5 @@ services:
 
 volumes:
   pgdata:
+  mongodata:
   parcel_photos:

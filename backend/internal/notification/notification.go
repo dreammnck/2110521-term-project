@@ -4,7 +4,6 @@ package notification
 
 import (
 	"context"
-	_ "embed"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -16,20 +15,31 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5/pgxpool"
+	"go.mongodb.org/mongo-driver/v2/bson"
+	"go.mongodb.org/mongo-driver/v2/mongo"
+	"go.mongodb.org/mongo-driver/v2/mongo/options"
 )
 
-//go:embed schema.sql
-var Schema string
-
+// Notifications live in MongoDB (document store): they are write-heavy, schema-flexible
+// per event type, and only ever read back per user.
 type Service struct {
-	db          *pgxpool.Pool
+	notifs      *mongo.Collection
 	identityURL string
 	http        *http.Client
 }
 
-func New(db *pgxpool.Pool, identityURL string) *Service {
-	return &Service{db: db, identityURL: identityURL, http: &http.Client{Timeout: 5 * time.Second}}
+func New(coll *mongo.Collection, identityURL string) *Service {
+	return &Service{notifs: coll, identityURL: identityURL, http: &http.Client{Timeout: 5 * time.Second}}
+}
+
+// EnsureIndexes creates the unique (event, user) index that makes event handling
+// idempotent, and the per-user inbox index.
+func (s *Service) EnsureIndexes(ctx context.Context) error {
+	_, err := s.notifs.Indexes().CreateMany(ctx, []mongo.IndexModel{
+		{Keys: bson.D{{Key: "event_id", Value: 1}, {Key: "user_id", Value: 1}}, Options: options.Index().SetUnique(true)},
+		{Keys: bson.D{{Key: "user_id", Value: 1}, {Key: "created_at", Value: -1}}},
+	})
+	return err
 }
 
 var EventKeys = []string{events.ParcelReceived, events.ParcelAccepted, events.AnnouncementPublished, events.UtilityBillIssued, events.PaymentCompleted}
@@ -49,17 +59,18 @@ func (s *Service) Handle(ctx context.Context, env events.Envelope) error {
 		return err
 	}
 	for _, uid := range users {
-		tag, err := s.db.Exec(ctx, `
-INSERT INTO notifications(id,event_id,user_id,type,title,body,ref_type,ref_id)
-VALUES($1,$2,$3,$4,$5,$6,$7,$8) ON CONFLICT (event_id,user_id) DO NOTHING`,
-			uuid.NewString(), env.ID, uid, msg.Type, msg.Title, msg.Body, msg.RefType, msg.RefID)
+		_, err := s.notifs.InsertOne(ctx, Notification{
+			ID: uuid.NewString(), EventID: env.ID, UserID: uid, Type: msg.Type, Title: msg.Title,
+			Body: msg.Body, RefType: msg.RefType, RefID: msg.RefID, CreatedAt: time.Now().UTC(),
+		})
+		if mongo.IsDuplicateKeyError(err) {
+			continue // event already processed for this user
+		}
 		if err != nil {
 			return err
 		}
-		if tag.RowsAffected() > 0 {
-			// Simulated Notification Provider (external system).
-			slog.Info("notification provider: send", "to", uid, "type", msg.Type, "title", msg.Title, "body", msg.Body)
-		}
+		// Simulated Notification Provider (external system).
+		slog.Info("notification provider: send", "to", uid, "type", msg.Type, "title", msg.Title, "body", msg.Body)
 	}
 	return nil
 }
@@ -86,15 +97,18 @@ func (s *Service) resolve(ctx context.Context, m Message) ([]string, error) {
 	return out.UserIDs, nil
 }
 
+// Notification is the MongoDB document and the REST representation.
 type Notification struct {
-	ID        string     `json:"id"`
-	Type      string     `json:"type"`
-	Title     string     `json:"title"`
-	Body      string     `json:"body"`
-	RefType   string     `json:"refType"`
-	RefID     string     `json:"refId"`
-	ReadAt    *time.Time `json:"readAt,omitempty"`
-	CreatedAt time.Time  `json:"createdAt"`
+	ID        string     `json:"id" bson:"_id"`
+	EventID   string     `json:"-" bson:"event_id"`
+	UserID    string     `json:"-" bson:"user_id"`
+	Type      string     `json:"type" bson:"type"`
+	Title     string     `json:"title" bson:"title"`
+	Body      string     `json:"body" bson:"body"`
+	RefType   string     `json:"refType" bson:"ref_type"`
+	RefID     string     `json:"refId" bson:"ref_id"`
+	ReadAt    *time.Time `json:"readAt,omitempty" bson:"read_at,omitempty"`
+	CreatedAt time.Time  `json:"createdAt" bson:"created_at"`
 }
 
 func (s *Service) Routes() http.Handler {
@@ -108,42 +122,49 @@ func (s *Service) Routes() http.Handler {
 
 func (s *Service) list(w http.ResponseWriter, r *http.Request) {
 	uid := httpx.IdentityFrom(r).UserID
-	rows, err := s.db.Query(r.Context(), `
-SELECT id,type,title,body,ref_type,ref_id,read_at,created_at FROM notifications WHERE user_id=$1 ORDER BY created_at DESC LIMIT 100`, uid)
+	cur, err := s.notifs.Find(r.Context(), bson.M{"user_id": uid},
+		options.Find().SetSort(bson.D{{Key: "created_at", Value: -1}}).SetLimit(100))
 	if err != nil {
 		httpx.Error(w, 500, "internal error")
 		return
 	}
-	defer rows.Close()
 	out := []Notification{}
-	for rows.Next() {
-		var n Notification
-		if err := rows.Scan(&n.ID, &n.Type, &n.Title, &n.Body, &n.RefType, &n.RefID, &n.ReadAt, &n.CreatedAt); err != nil {
-			httpx.Error(w, 500, "internal error")
-			return
-		}
-		out = append(out, n)
+	if err := cur.All(r.Context(), &out); err != nil {
+		httpx.Error(w, 500, "internal error")
+		return
 	}
 	httpx.JSON(w, 200, out)
 }
 
 func (s *Service) markRead(w http.ResponseWriter, r *http.Request) {
 	uid := httpx.IdentityFrom(r).UserID
-	tag, err := s.db.Exec(r.Context(), `UPDATE notifications SET read_at=COALESCE(read_at,now()) WHERE id=$1 AND user_id=$2`, chi.URLParam(r, "id"), uid)
+	id := chi.URLParam(r, "id")
+	own := bson.M{"_id": id, "user_id": uid}
+	res, err := s.notifs.UpdateOne(r.Context(), bson.M{"_id": id, "user_id": uid, "read_at": nil},
+		bson.M{"$set": bson.M{"read_at": time.Now().UTC()}})
 	if err != nil {
-		httpx.Error(w, 400, "invalid id")
+		httpx.Error(w, 500, "internal error")
 		return
 	}
-	if tag.RowsAffected() == 0 {
-		httpx.Error(w, 404, "notification not found")
-		return
+	if res.MatchedCount == 0 {
+		// Either already read (fine) or not this user's notification (404).
+		n, err := s.notifs.CountDocuments(r.Context(), own)
+		if err != nil {
+			httpx.Error(w, 500, "internal error")
+			return
+		}
+		if n == 0 {
+			httpx.Error(w, 404, "notification not found")
+			return
+		}
 	}
 	httpx.JSON(w, 200, map[string]bool{"ok": true})
 }
 
 func (s *Service) markAllRead(w http.ResponseWriter, r *http.Request) {
 	uid := httpx.IdentityFrom(r).UserID
-	if _, err := s.db.Exec(r.Context(), `UPDATE notifications SET read_at=now() WHERE user_id=$1 AND read_at IS NULL`, uid); err != nil {
+	if _, err := s.notifs.UpdateMany(r.Context(), bson.M{"user_id": uid, "read_at": nil},
+		bson.M{"$set": bson.M{"read_at": time.Now().UTC()}}); err != nil {
 		httpx.Error(w, 500, "internal error")
 		return
 	}
