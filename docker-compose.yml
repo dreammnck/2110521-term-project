@@ -39,6 +39,9 @@ services:
 
   rabbitmq:
     image: rabbitmq:3-management-alpine
+    restart: on-failure:3   # the image occasionally fails its very first start on a fresh volume (.erlang.cookie eacces)
+    environment:
+      RABBITMQ_ERLANG_COOKIE: condo-dev-cookie
     ports: ["5672:5672", "15672:15672"]
     healthcheck:
       test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]

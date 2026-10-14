@@ -104,4 +104,5 @@ docker compose exec mongo mongosh notification_db --quiet --eval 'db.notificatio
 | Page won't load | `docker compose ps`; `docker compose up -d` |
 | Port 3000/3001 already used | put `STAFF_PORT=3100` / `RESIDENT_PORT=3101` in `.env`, `docker compose up -d` |
 | No notifications | `docker compose logs notification-adapter` (needs RabbitMQ + Mongo healthy) |
+| `rabbitmq` exits right after a clean start (`.erlang.cookie: eacces` in `docker compose logs rabbitmq`) | known first-start flake; just run `docker compose up -d` again |
 | Want a clean slate | `make clean && make up` |
