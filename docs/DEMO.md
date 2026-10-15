@@ -1,5 +1,7 @@
 # Demo video script (target ≈ 4:30, hard limit 5:00)
 
+ไทย: [DEMO.th.md](DEMO.th.md)
+
 **Must show:** all 3 business use cases + authentication · 2 database types (**PostgreSQL = RDBMS**, **MongoDB = NoSQL**) · a service using a message broker (**RabbitMQ**).
 
 ## Before you hit record (5 min)

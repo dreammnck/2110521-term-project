@@ -215,7 +215,7 @@ Notes and deliberate choices:
 
 ## Demo
 
-A timed (< 5 min) video script covering all use cases, both database types and RabbitMQ is in [`docs/DEMO.md`](docs/DEMO.md).
+A timed (< 5 min) video script covering all use cases, both database types and RabbitMQ is in [`docs/DEMO.md`](docs/DEMO.md) (Thai: [`docs/DEMO.th.md`](docs/DEMO.th.md)).
 
 ## Layout
 
